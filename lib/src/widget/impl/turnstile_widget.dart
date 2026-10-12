@@ -492,12 +492,27 @@ class _CloudflareTurnstileState extends State<CloudflareTurnstile> {
       _ready(true);
     },
     onConsoleMessage: (controller, consoleMessage) {},
-    onReceivedError: (controller, __, error) {
+    onReceivedError: (controller, request, error) {
+      final host = request.url.host;
       if (error.type == WebResourceErrorType.CANNOT_CONNECT_TO_HOST) {
         return;
       }
+      // 来自 *.challenges.cloudflare.com 子域的 DNS 解析失败是 Turnstile 的
+      // 正常现象，Cloudflare 明确说明属于非阻塞错误，尤其会影响 WebView 集成：
+      // 若把它当致命错误，会在挑战其实可以正常完成时中断流程。
+      // 参考：https://developers.cloudflare.com/cloudflare-challenges/troubleshooting/challenge-solve-issues/
+      if (error.type == WebResourceErrorType.HOST_LOOKUP &&
+          host.isNotEmpty &&
+          host != 'challenges.cloudflare.com' &&
+          host.endsWith('.challenges.cloudflare.com')) {
+        return;
+      }
       _ready(false);
-      _addError(TurnstileException(error.description));
+      // 把失败 host 带进异常信息：原始实现只有 description，排查时无法定位是哪个域名。
+      final detail = host.isEmpty
+          ? error.description
+          : '${error.description} ($host)';
+      _addError(TurnstileException(detail));
     },
     onPermissionRequest: (_, __) async => PermissionResponse(),
   );
